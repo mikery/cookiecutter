@@ -1,8 +1,11 @@
 """Functions for prompting the user for project info."""
 import json
+import re
 from collections import OrderedDict
+from functools import partial
 
 import click
+from click import UsageError
 from jinja2.exceptions import UndefinedError
 
 from cookiecutter.environment import StrictEnvironment
@@ -17,6 +20,41 @@ def read_user_variable(var_name, default_value):
     """
     # Please see https://click.palletsprojects.com/en/7.x/api/#click.prompt
     return click.prompt(var_name, default=default_value)
+
+
+def my_validator(regex, _type, value):
+    """ Validate value against regex and return it as _type()"""
+    type_mapping = {
+        'string': str,
+        'integer': int
+    }
+    try:
+        _value = type_mapping[_type](value)
+    except ValueError as e:
+        raise UsageError(f"Not a valid {_type}: {value}")
+    if regex:
+        if not re.match(regex, _value):
+            raise UsageError(f"regex fail: {regex}")
+    return _value
+
+
+def my_read_user_variable(var_name, default_value, _type, examples=None, description=None, regex=None):
+
+
+    if description:
+        click.echo(f"{description}\n\n")
+    click.echo(f"Enter a {_type} value for {var_name}")
+    if examples:
+        click.echo(f"Example values:")
+        [click.echo(f"\t{example}") for example in examples]
+
+    validator = partial(my_validator, regex, _type)
+    value = click.prompt(var_name, default=default_value, value_proc=validator)
+    # value = click.prompt(var_name, default=default_value, value_proc=validator, type=type_mapping[_type])
+    click.echo()  # empty echo to get a new line
+    return value
+
+
 
 
 def read_user_yes_no(question, default_value):
@@ -167,15 +205,44 @@ def prompt_choice_for_config(cookiecutter_dict, env, key, options, no_input):
         return rendered_options[0]
     return read_user_choice(key, rendered_options)
 
-
 def prompt_for_config(context, no_input=False):
     """Prompt user to enter a new config.
 
     :param dict context: Source for field names and sample values.
     :param no_input: Prompt the user at command line for manual configuration?
+
+    This needs to change quite a bit to support jsonschema.
+    - move values from cookiecutter.value to values.value in context for easier validation
+    - only use cookiecutter.json for providing defaults
+        - ignore everything not beginning with _ (internal keys for cookiecutter)
+        - iterate over properties from schema. use schema info to generate prompt
+
     """
     cookiecutter_dict = OrderedDict([])
     env = StrictEnvironment(context=context)
+
+    values = {}
+    if "_schema" in context['cookiecutter'].keys():
+        for key, _property in context['cookiecutter']['_schema']['properties'].items():
+            # Use the default from the schema or the context
+            if key in context['cookiecutter']:
+                default_value = context['cookiecutter'][key]
+            elif 'default' in _property:
+                default_value = _property['default']
+            else:
+                default_value = None
+
+            values[key] = my_read_user_variable(
+                var_name=key,
+                default_value=default_value,
+                _type=_property['type'],
+                examples=_property.get('examples', None),
+                description=_property.get('description', None),
+                regex=_property.get('pattern', None),
+            )
+
+        cookiecutter_dict['values'] = values
+
 
     # First pass: Handle simple and raw variables, plus choices.
     # These must be done first because the dictionaries keys and
@@ -187,43 +254,43 @@ def prompt_for_config(context, no_input=False):
         elif key.startswith('__'):
             cookiecutter_dict[key] = render_variable(env, raw, cookiecutter_dict)
             continue
-
-        try:
-            if isinstance(raw, list):
-                # We are dealing with a choice variable
-                val = prompt_choice_for_config(
-                    cookiecutter_dict, env, key, raw, no_input
-                )
-                cookiecutter_dict[key] = val
-            elif not isinstance(raw, dict):
-                # We are dealing with a regular variable
-                val = render_variable(env, raw, cookiecutter_dict)
-
-                if not no_input:
-                    val = read_user_variable(key, val)
-
-                cookiecutter_dict[key] = val
-        except UndefinedError as err:
-            msg = "Unable to render variable '{}'".format(key)
-            raise UndefinedVariableInTemplate(msg, err, context)
-
-    # Second pass; handle the dictionaries.
-    for key, raw in context['cookiecutter'].items():
-        # Skip private type dicts
-        if key.startswith('_') and not key.startswith('__'):
-            continue
-
-        try:
-            if isinstance(raw, dict):
-                # We are dealing with a dict variable
-                val = render_variable(env, raw, cookiecutter_dict)
-
-                if not no_input:
-                    val = read_user_dict(key, val)
-
-                cookiecutter_dict[key] = val
-        except UndefinedError as err:
-            msg = "Unable to render variable '{}'".format(key)
-            raise UndefinedVariableInTemplate(msg, err, context)
+    #
+    #     try:
+    #         if isinstance(raw, list):
+    #             # We are dealing with a choice variable
+    #             val = prompt_choice_for_config(
+    #                 cookiecutter_dict, env, key, raw, no_input
+    #             )
+    #             cookiecutter_dict[key] = val
+    #         elif not isinstance(raw, dict):
+    #             # We are dealing with a regular variable
+    #             val = render_variable(env, raw, cookiecutter_dict)
+    #
+    #             if not no_input:
+    #                 val = read_user_variable(key, val)
+    #
+    #             cookiecutter_dict[key] = val
+    #     except UndefinedError as err:
+    #         msg = "Unable to render variable '{}'".format(key)
+    #         raise UndefinedVariableInTemplate(msg, err, context)
+    #
+    # # Second pass; handle the dictionaries.
+    # for key, raw in context['cookiecutter'].items():
+    #     # Skip private type dicts
+    #     if key.startswith('_') and not key.startswith('__'):
+    #         continue
+    #
+    #     try:
+    #         if isinstance(raw, dict):
+    #             # We are dealing with a dict variable
+    #             val = render_variable(env, raw, cookiecutter_dict)
+    #
+    #             if not no_input:
+    #                 val = read_user_dict(key, val)
+    #
+    #             cookiecutter_dict[key] = val
+    #     except UndefinedError as err:
+    #         msg = "Unable to render variable '{}'".format(key)
+    #         raise UndefinedVariableInTemplate(msg, err, context)
 
     return cookiecutter_dict

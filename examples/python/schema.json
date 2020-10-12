@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "default": "alice",
+      "examples": [
+        "alice",
+        "bob"
+      ],
+      "pattern": "^[A-Za-z]+"
+    },
+    "count": {
+      "type": "integer",
+      "default": 0,
+      "minLength": 1,
+      "examples": [
+        1, 2
+      ],
+      "description": "A counter used to count things."
+    }
+  },
+  "required": [
+    "name",
+    "count"
+  ]
+}

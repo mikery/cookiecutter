@@ -100,6 +100,12 @@ def generate_context(
     file_stem = file_name.split('.')[0]
     context[file_stem] = obj
 
+    if "_schema_file" in obj.keys():
+        # Read schema file and add to context (only local files for now)
+        schema_path = os.path.join(os.path.dirname(context_file), obj['_schema_file'])
+        with open(schema_path) as f:
+            obj['_schema'] = json.load(f)
+
     # Overwrite context variable defaults with the default context from the
     # user's global config, if available
     if default_context:

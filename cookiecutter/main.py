@@ -4,8 +4,12 @@ Main entry point for the `cookiecutter` command.
 The code in this module is also a good example of how to use Cookiecutter as a
 library rather than a script.
 """
+import json
 import logging
 import os
+import sys
+
+from jsonschema import validate, ValidationError, Draft7Validator
 
 from cookiecutter.config import get_user_config
 from cookiecutter.exceptions import InvalidModeException
@@ -100,6 +104,20 @@ def cookiecutter(
 
         # include output+dir in the context dict
         context['cookiecutter']['_output_dir'] = os.path.abspath(output_dir)
+
+        if "_schema" in context['cookiecutter']:
+            # Read schema file and add to context (only local files for now)
+            schema = context['cookiecutter']['_schema']
+            v = Draft7Validator(schema)
+            values = context['cookiecutter']['values']
+            errors = sorted(v.iter_errors(values), key=lambda e: e.path)
+            if errors:
+                for error in errors:
+                    print(f"{'.'.join(error.path)}: {error.message}")
+                    # print(f"Example values are {repr(schema['properties']['.'.join(error.path)]['examples'])}")
+                    for suberror in sorted(error.context, key=lambda e: e.schema_path):
+                        print(list(suberror.schema_path), suberror.message, sep=", ")
+                sys.exit(1)
 
         dump(config_dict['replay_dir'], template_name, context)
 
